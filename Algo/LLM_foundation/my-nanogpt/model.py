@@ -1,7 +1,6 @@
 # model
 
 import math
-from turtle import forward
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -61,27 +60,55 @@ class CausalSelfAttention(nn.Module):
         # y = F.scaled_dot_product_attention(q,k,v,attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
         # (B, H, T, E) --> (B, T, C)
         y = y.transpose(1, 2).contiguous().view(B, T, C) 
-        y = self.dropout(y)
+        y = self.dropout(self.c_proj(y))
         return y
 
 class MLP(nn.Module):
     def __init__(self, config) -> None:
         super().__init__()
+        self.c_fc = nn.Linear(config.n_embd, 4*config.n_embd, bias=config.bias)
+        self.gelu = nn.GELU()
+        self.c_proj = nn.Linear(config.n_embd*4, config.n_embd, bias=config.bias)
+        self.dropout = nn.Dropout(config.dropout)
     
     def forward(self, x):
-        pass
+        x = self.c_fc(x)
+        x = self.gelu(x)
+        x = self.c_proj(x)
+        x = self.dropout(x)
+        return x
 
-class Transformer(nn.Module):
+class Block(nn.Module):
     def __init__(self, config) -> None:
         super().__init__()
+        self.ln_1 = LayerNorm(config.n_embd, config.bias)
+        self.attn = CausalSelfAttention(config)
+        self.ln_2 = LayerNorm(config.n_embd, config.bias)
+        self.mlp = MLP(config)
 
     def forward(self, x):
-        pass
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
+        return x 
 
 class GPT(nn.Module):
     def __init__(self, config) -> None:
         super().__init__()
-    
+        assert config.vocal_size is not None
+        assert config.block_size is not None
+        self.config = config
+
+        self.transformer = nn.ModuleList(dict(
+            wte = nn.Embedding(config.vocal_size, config.n_embd),
+            wpe = nn.Embedding(config.vocal_size, config.n_embd),
+            drop = nn.Dropout(config.dropout),
+            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            ln_f = LayerNorm(config.n_embd, config.bias),
+        ))
+        
+        self.lm_head = nn.Linear(config.n_embd, config.vocal_size, bias=False)
+        self.apply(self._init_weights)
+
     def forward(self, x):
         pass
 
